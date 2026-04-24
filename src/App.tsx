@@ -8,7 +8,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Search, Book, Sparkles, Languages, Loader2, Volume2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const API_KEY = process.env.GEMINI_API_KEY;
+const genAI = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 interface VerseData {
   reference: string;
@@ -27,31 +28,35 @@ export default function App() {
     e.preventDefault();
     if (!query.trim()) return;
 
+    if (!genAI) {
+      setError('API 키가 설정되지 않았습니다. 관리자에게 문의하거나 설정(Secrets)에서 GEMINI_API_KEY를 확인해 주세요.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setVerse(null);
 
     try {
       const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Bible Verse Reference: ${query}`,
+        model: "gemini-flash-latest",
+        contents: `Translate and provide details for this Bible verse: ${query}`,
         config: {
-          systemInstruction: `You are a specialist in the Bible and linguistics. 
-          The user will provide a Bible verse reference in Korean or English.
-          Your task is to retrieve the verse and return it as a JSON object.
-          
-          JSON structure:
+          systemInstruction: `You are a professional Bible scholar and linguist fluent in both English and Korean.
+          Your task is to take a Bible verse reference (in any format, Korean or English) and return a structured JSON response.
+
+          Output Format (JSON):
           {
-            "reference": "Full English reference (e.g. Matthew 4:4)",
-            "english": "NIV version of the verse",
-            "korean": "Standard Korean translation (개역개정/KRV)",
-            "pronunciation": "Full English verse phonetically written in Korean Hangeul (e.g. '인 더 비기닝...')"
+            "reference": "Full official English reference (e.g., Matthew 4:4)",
+            "english": "NIV translation of the verse",
+            "korean": "Standard Korean translation (KRV/개역개정)",
+            "pronunciation": "Phonetic Korean Hangeul transcription of the ENTIRE English verse. Example: 'In the beginning' -> '인 더 비기닝'"
           }
 
           Rules:
-          - Response MUST be a single JSON object.
-          - If the verse is not found, return: { "error": "해당 성경 구절을 찾을 수 없습니다. 정확한 장과 절을 입력해 주세요." }
-          - ALWAYS provide the 'pronunciation' in natural Korean Hangeul.`,
+          1. If the reference is invalid, return: { "error": "찾으시는 구절을 성경에서 찾을 수 없습니다. (예: 마태 4:4)" }
+          2. The pronunciation MUST be natural and cover the full English text.
+          3. Only return JSON.`,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -68,24 +73,28 @@ export default function App() {
       });
 
       const text = response.text;
-      console.log('Gemini Response:', text);
-      
       if (!text) {
-        throw new Error('응답을 받을 수 없습니다.');
+        throw new Error('AI로부터 빈 응답을 받았습니다.');
       }
 
+      console.log('AI Response:', text);
       const data = JSON.parse(text);
 
       if (data.error) {
         setError(data.error);
-      } else if (!data.english || !data.korean) {
-        setError('구절 정보를 올바르게 가져오지 못했습니다.');
       } else {
         setVerse(data);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Translation error:', err);
-      setError('검색 중 오류가 발생했습니다. 구절 형식을 확인(예: 마태복음 4:4)하거나 잠시 후 다시 시도해 주세요.');
+      // More specific error messages
+      if (err?.message?.includes('429')) {
+        setError('일일 사용량이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
+      } else if (err?.message?.includes('API_KEY')) {
+        setError('API 키가 올바르지 않습니다. 설정을 확인해 주세요.');
+      } else {
+        setError(`검색 중 오류가 발생했습니다: ${err.message || '다시 시도해 주세요.'}`);
+      }
     } finally {
       setLoading(false);
     }
